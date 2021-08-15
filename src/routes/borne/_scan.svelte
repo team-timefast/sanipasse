@@ -150,7 +150,9 @@
 				<div class="row">
 					<div class="col-md-2"><div class="sign shallpass" /></div>
 					<div class="col-md-10">
-						<h3>Bienvenue, {showName(passOrErr.cert)}</h3>
+						<h3>
+							Bienvenue, {#if !config.anonymize}{showName(passOrErr.cert)}{/if}
+						</h3>
 						<p>Votre passe est validé.</p>
 						<div class="progress">
 							<div
