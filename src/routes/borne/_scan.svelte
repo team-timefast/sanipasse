@@ -4,6 +4,7 @@
 	import { assets } from '$app/paths';
 	import type { ConfigProperties, HTTPRequest } from './_config';
 	import QrCodeVideoReader from '../_QrCodeVideoReader.svelte';
+	import { onDestroy } from 'svelte';
 
 	export let config: ConfigProperties;
 	const { decode_after_s, reset_after_s, prevent_revalidation_before_minutes } = config;
@@ -20,6 +21,7 @@
 		last_name: string;
 		date_of_birth: Date;
 		validated: bool;
+		date_of_validation: Date;
 	}
 
 	type PassHistoryEntry = PassHistory;
@@ -27,6 +29,9 @@
 	let last_event: KeyboardEvent | null = null;
 	let validated_passes: Map<string, number> = new Map();
 	let passes_history: PassHistoryEntry[] = [];
+	const pass_history_clean_interval = setInterval(() => {
+		passes_history = passes_history.filter((passHistoryEntry) => Date.now() - passHistoryEntry.date_of_validation.getTime() < 30000);
+	}, 5000);
 
 	const prevent_revalidation_before_ms = (prevent_revalidation_before_minutes || 0) * 60 * 1000;
 
@@ -99,7 +104,8 @@
 				first_name: cert.first_name,
 				last_name: cert.last_name,
 				date_of_birth: cert.date_of_birth,
-				validated: false
+				validated: false,
+				date_of_validation: new Date(Date.now())
 			};
 			if(error == undefined) {
 				data = Object.assign(data, {validated: true});
@@ -108,9 +114,9 @@
 				data = Object.assign(data, {validated: false});
 				onInvalid();
 			}
+			passes_history = [data, ...passes_history].slice(0, 4);
 			reset_timeout = setTimeout(() => {
 				codeFoundPromise = undefined;
-				passes_history = [data, ...passes_history].slice(0, 4);
 			}, reset_after_s * 1000);
 		});
 		//timeout = undefined;
@@ -128,6 +134,8 @@
 			date_of_birth.toLocaleDateString()
 		);
 	}
+
+	onDestroy(() => clearInterval(pass_history_clean_interval));
 </script>
 
 <svelte:window on:keypress={onKeyPress} on:paste={onPaste} />
@@ -196,28 +204,17 @@
 		<p>{config.description}</p>
 	{/if}
 
-        {#each passes_history as passHistoryEntry}
-            {#if passHistoryEntry.validated == false}
-                        <div class="alert alert-danger" role="alert">
-                                <div class="row">
-                                        <div class="col-md-2"><div class="sign shallnotpass" /></div>
-                                        <div class="col-md-10">
-                                                <h3>{showName(passHistoryEntry)}</h3>
-                                        </div>
-                                </div>
-                        </div>
-             {:else}
-                        <div class="alert alert-success" role="alert">
-                                <div class="row">
-                                        <div class="col-md-2"><div class="sign shallpass" /></div>
-                                        <div class="col-md-10">
-                                                <h3>{showName(passHistoryEntry)}</h3>
-                                        </div>
-                                </div>
-                        </div>
-             {/if}
-        {/each}
-
+	{#each passes_history as passHistoryEntry}
+		<div class="alert {passHistoryEntry.validated ? 'alert-success' : 'alert-danger'}" role="alert">
+				<div class="row">
+						<div class="col-md-2"><div class="sign {passHistoryEntry.validated ? 'shallpass' : 'shallnotpass'}" /></div>
+						<div class="col-md-10">
+								<h3>{showName(passHistoryEntry)}</h3>
+								<p class="font-monospace">Date du scan : {passHistoryEntry.date_of_validation.toLocaleString()}</p>
+						</div>
+				</div>
+		</div>
+	{/each}
 
 	{#if config.video_scan}
 		<div class="videoinput w-100" style="display: {codeFoundPromise ? 'none' : 'flex'}">
