@@ -54,6 +54,7 @@
 		//if (timeout !== undefined) clearTimeout(timeout);
 		if (reset_timeout !== undefined) {
 			clearTimeout(reset_timeout);
+			reset_timeout = undefined;
 			passes_history = passes_history.map(ph => Object.assign(ph, {visible: true}));
 		}
 		//timeout = setTimeout(launchParsing, decode_after_s * 1000, code);
