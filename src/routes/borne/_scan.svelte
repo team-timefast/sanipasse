@@ -122,13 +122,7 @@
 			passes_history = [data, ...passes_history].slice(0, 4);
 			reset_timeout = setTimeout(() => {
 				codeFoundPromise = undefined;
-				passes_history = passes_history.map(ph =>
-					ph.date_of_validation.getTime() === data.date_of_validation.getTime()
-					&& ph.first_name === data.first_name && ph.last_name === data.last_name
-					&& ph.date_of_birth.getTime() === data.date_of_birth.getTime() ?
-					Object.assign(ph, {visible: true})
-					: ph
-				)
+				passes_history[0] = Object.assign(passes_history[0], {visible: true});
 			}, reset_after_s * 1000);
 		});
 		//timeout = undefined;
