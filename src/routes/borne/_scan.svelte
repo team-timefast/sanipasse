@@ -52,7 +52,10 @@
 		}
 		code += event.key;
 		//if (timeout !== undefined) clearTimeout(timeout);
-		if (reset_timeout !== undefined) clearTimeout(reset_timeout);
+		if (reset_timeout !== undefined) {
+			clearTimeout(reset_timeout);
+			passes_history = passes_history.map(ph => Object.assign(ph, {visible: true}));
+		}
 		//timeout = setTimeout(launchParsing, decode_after_s * 1000, code);
 		event.preventDefault();
 	}
