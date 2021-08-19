@@ -20,7 +20,8 @@
 		first_name: string;
 		last_name: string;
 		date_of_birth: Date;
-		validated: bool;
+		validated: boolean;
+		visible: boolean;
 		date_of_validation: Date;
 	}
 
@@ -105,6 +106,7 @@
 				last_name: cert.last_name,
 				date_of_birth: cert.date_of_birth,
 				validated: false,
+				visible: false,
 				date_of_validation: new Date(Date.now())
 			};
 			if(error == undefined) {
@@ -117,6 +119,13 @@
 			passes_history = [data, ...passes_history].slice(0, 4);
 			reset_timeout = setTimeout(() => {
 				codeFoundPromise = undefined;
+				passes_history = passes_history.map(ph =>
+					ph.date_of_validation.getTime() === data.date_of_validation.getTime()
+					&& ph.first_name === data.first_name && ph.last_name === data.last_name
+					&& ph.date_of_birth.getTime() === data.date_of_birth.getTime() ?
+					Object.assign(ph, {visible: true})
+					: ph
+				)
 			}, reset_after_s * 1000);
 		});
 		//timeout = undefined;
@@ -130,8 +139,8 @@
 			first_name.slice(1).toLowerCase() +
 			' ' +
 			last_name.toUpperCase() +
-			' ' +
-			date_of_birth.toLocaleDateString()
+			' né(e) le ' +
+			date_of_birth.toLocaleDateString("fr")
 		);
 	}
 
@@ -205,15 +214,17 @@
 	{/if}
 
 	{#each passes_history as passHistoryEntry}
-		<div class="alert {passHistoryEntry.validated ? 'alert-success' : 'alert-danger'}" role="alert">
-				<div class="row">
-						<div class="col-md-2"><div class="sign {passHistoryEntry.validated ? 'shallpass' : 'shallnotpass'}" /></div>
-						<div class="col-md-10">
-								<h3>{showName(passHistoryEntry)}</h3>
-								<p class="font-monospace">Date du scan : {passHistoryEntry.date_of_validation.toLocaleString()}</p>
-						</div>
-				</div>
-		</div>
+		{#if passHistoryEntry.visible}
+			<div class="alert {passHistoryEntry.validated ? 'alert-success' : 'alert-danger'}" role="alert">
+					<div class="row">
+							<div class="col-md-2"><div class="sign {passHistoryEntry.validated ? 'shallpass' : 'shallnotpass'}" /></div>
+							<div class="col-md-10">
+									<h3>{showName(passHistoryEntry)}</h3>
+									<p class="font-monospace">Date du scan : {passHistoryEntry.date_of_validation.toLocaleString("fr")}</p>
+							</div>
+					</div>
+			</div>
+		{/if}
 	{/each}
 
 	{#if config.video_scan}
