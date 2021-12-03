@@ -1,11 +1,29 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import b64 from 'base64-js';
-	import { load_config, save_config, DEFAULT_CONFIG } from './_config';
+	import { DEFAULT_CONFIG } from './_config';
+	import type { ConfigProperties } from './_config';
+	import { load_config as load_config_local_storage, save_config } from './_config_storage';
 	import ExternalRequestsConfig from './_external_request_config.svelte';
+	import { generateKey } from '$lib/random_key';
+	import { get, put } from '$lib/http';
+	import ShowPromiseError from '../_showPromiseError.svelte';
+	import SoundPicker from './_sound_picker.svelte';
+
+	let configKey: string = '';
+	if (typeof window === 'object') configKey = new URLSearchParams(location.search).get('key') || '';
 
 	let config = DEFAULT_CONFIG;
 	let video_scan_num = 0;
+
+	async function load_config_from_key(): Promise<ConfigProperties> {
+		return get(`/api/borne/${configKey}`);
+	}
+
+	async function load_config() {
+		if (configKey) return load_config_from_key();
+		else return load_config_local_storage();
+	}
 
 	let config_promise = load_config();
 	config_promise.then((data) => {
@@ -15,16 +33,27 @@
 	let loading = false;
 	$: config.video_scan = !!video_scan_num;
 
-	function fileUrlFromInput(evt: { currentTarget: HTMLInputElement }): Promise<string[]> {
-		const { files } = evt.currentTarget;
+	let logosFileInput: HTMLInputElement | null = null;
+	async function updateLogosUrls() {
+		if (!logosFileInput) throw new Error('missing file element');
+		const { files } = logosFileInput;
 		if (!files || !files.length) throw new Error('No file in input');
-		return Promise.all(
-			Array.from(files).map(async (f) => {
-				const buffer = await f.arrayBuffer();
-				const bytes = new Uint8Array(buffer);
-				return `data:${f.type};base64,${b64.fromByteArray(bytes)}`;
-			})
-		);
+		const files_buffers = Array.from(files).map((file) => ({
+			file,
+			arrayBuffer: file.arrayBuffer()
+		}));
+		config.logo_urls = [];
+		for (const { file, arrayBuffer } of files_buffers) {
+			const buffer = await arrayBuffer;
+			const bytes = new Uint8Array(buffer);
+			const url = `data:${file.type};base64,${b64.fromByteArray(bytes)}`;
+			config.logo_urls.push(url);
+			config.logo_urls = config.logo_urls; // refresh
+		}
+	}
+	function resetLogosUrls() {
+		config.logo_urls = [];
+		if (logosFileInput) logosFileInput.value = '';
 	}
 
 	let video_preview: HTMLVideoElement | undefined = undefined;
@@ -46,9 +75,18 @@
 			});
 			has_video_preview = true;
 		} catch (err) {
-			video_preview_error = err;
+			video_preview_error = err instanceof Error ? err : new Error(`${err}`);
 		}
 	}
+
+	async function uploadConfig() {
+		if (!configKey) configKey = generateKey();
+		uploadConfigPromise = put(`/api/borne/${configKey}`, config);
+		await uploadConfigPromise;
+		await goto(`/borne/config?key=${configKey}`);
+	}
+
+	let uploadConfigPromise: Promise<unknown> | null = null;
 </script>
 
 <svelte:head>
@@ -59,22 +97,36 @@
 	/>
 </svelte:head>
 
-{#await config_promise}
-	Chargement de la configuration...
-{/await}
+<ShowPromiseError promise={config_promise} />
 
 <h1>Configuration de l'interface de validation des passes <i>Sanipasse borne</i></h1>
-<p>
-	<i>Sanipasse borne</i> est un logiciel libre et gratuit à installer sur une borne de contrôle automatique
-	des pass sanitaires.
-</p>
-<p>
-	Cette page vous permet de configurer l'interface de scan et de contrôle des passes. Une fois sur
-	la page de scan, il vous faudra soit un lecteur physique de QR code, soit une webcam pour lire les
-	passes sanitaires.
-</p>
+
+{#if configKey}
+	<p>
+		Cette configuration est utilisable depuis n'importe quel appareil en chargeant l'adresse
+		suivante :
+		<a href="/borne?key={configKey}" class="font-monospace"
+			>{typeof window === 'object' ? window.location.host : 'sanipasse.fr'}/borne?key={configKey}</a
+		>
+	</p>
+	<p>
+		La configuration est modifiable uniquement à partir de la page actuelle, dont vous pouvez
+		partager l'adresse avec vos collaborateurs.
+	</p>
+{:else}
+	<p>
+		<i>Sanipasse borne</i> est un logiciel libre et gratuit à installer sur une borne de contrôle automatique
+		des pass sanitaires.
+	</p>
+	<p>
+		Cette page vous permet de configurer l'interface de scan et de contrôle des passes. Une fois sur
+		la page de scan, il vous faudra soit un lecteur physique de QR code, soit une webcam pour lire
+		les passes sanitaires.
+	</p>
+{/if}
+
 <form
-	class="row g-3"
+	class="row g-3 my-3"
 	on:submit|preventDefault={async () => {
 		loading = true;
 		console.log(config);
@@ -83,58 +135,6 @@
 		loading = false;
 	}}
 >
-	<fieldset class="col-md-12">
-		<legend>Durée d'attente...</legend>
-
-		<div class="row">
-			{#if !video_scan_num}
-				<div class="form-label col-xl-4">
-					<label for="wait">...avant la validation du code saisi</label>
-					<div class="input-group">
-						<input
-							type="number"
-							step="0.01"
-							class="form-control"
-							placeholder="1"
-							id="wait"
-							title="Temps de lecture du code par le lecteur de QR code physique"
-							bind:value={config.decode_after_s}
-						/>
-						<div class="input-group-text">secondes</div>
-					</div>
-				</div>
-			{/if}
-			<div class="form-label col-xl-4">
-				<label for="back">...avant le retour à l'interface de scan</label>
-				<div class="input-group">
-					<input
-						type="number"
-						step="0.1"
-						class="form-control"
-						placeholder="4"
-						id="back"
-						title="Temps d'affichage du message d'acceptation ou de refus du passe"
-						bind:value={config.reset_after_s}
-					/>
-					<div class="input-group-text">secondes</div>
-				</div>
-			</div>
-			<div class="form-label col-xl-4">
-				<label for="norevalidation">...avant de pouvoir réutiliser un même passe</label>
-				<div class="input-group">
-					<input
-						type="number"
-						class="form-control"
-						placeholder="pas de revalidation avant:"
-						id="norevalidation"
-						title="Une fois qu'un pass a été validé, il ne peut pas être réutilisé pendant cette durée, pour éviter que plusieurs personnes ne scannent le même passe."
-						bind:value={config.prevent_revalidation_before_minutes}
-					/>
-					<div class="input-group-text">minutes</div>
-				</div>
-			</div>
-		</div>
-	</fieldset>
 	<fieldset class="col-md-12">
 		<legend>Affichage</legend>
 
@@ -145,19 +145,23 @@
 					<input
 						type="file"
 						class="form-control"
-						on:change={async (e) => {
-							config.logo_urls = await fileUrlFromInput(e);
-						}}
+						bind:this={logosFileInput}
+						on:change={updateLogosUrls}
 						accept="image/*"
 						multiple
 						id="bgimage"
 					/>
 				</div>
 			</div>
-			<div class="col-12">
+			<div class="col-12 mb-3">
 				{#each config.logo_urls as url}
 					<img alt="logo" src={url} class="m-1" style="max-height: 3em" />
 				{/each}
+				{#if config.logo_urls.length > 0}
+					<button type="button" class="btn btn-sm btn-outline-danger" on:click={resetLogosUrls}
+						>Supprimer</button
+					>
+				{/if}
 			</div>
 			<label class="col-12 mb-3">
 				Titre de la page
@@ -168,7 +172,7 @@
 					placeholder="Texte affiché en haut de l'interface de scan"
 				/>
 			</label>
-			<div class="form-floating col-12">
+			<div class="form-floating col-12 text-muted">
 				<textarea
 					bind:value={config.description}
 					class="form-control"
@@ -179,7 +183,11 @@
 				<label for="desc">Instructions</label>
 			</div>
 			<label class="col-12 mb-3">
-				Informations contractuelles en bas de la page
+				Informations contractuelles en bas de la page<br />
+				<small class="text-muted"
+					>(La <a href="/LICENSE">licence</a> de sanipasse vous demande d'informer vos utilisateurs de
+					l'utilisation du logiciel, ainsi que de sa licence)
+				</small>
 				<input
 					type="text"
 					class="form-control"
@@ -187,20 +195,11 @@
 					placeholder="Affiché en petits caractères en sous l'interface de scan"
 				/>
 			</label>
-			<label class="col-6 mb-3">
-				Police de caractères du texte
-				<input
-					type="text"
-					class="form-control"
-					bind:value={config.font}
-					placeholder="Arial, Helvetica, Garamond, ..."
-				/>
-			</label>
-			<label class="col-6 mb-3">
-				Taille du texte
-				<input type="text" class="form-control" bind:value={config.font_size} placeholder="12" />
-			</label>
-			<label class="col-4 mb-3">
+
+			<label
+				class="col-4 mb-3"
+				title="Si cette option est activée, le message de validation ne contiendra pas le nom de la personne dont le passe a été validé"
+			>
 				<input type="checkbox" bind:checked={config.anonymize} />
 				Cacher l'identité de la personne
 			</label>
@@ -249,18 +248,172 @@
 				<input type="checkbox" bind:checked={config.debug} />
 				Affichage des informations de débogage
 			</label>
+
+			<details class="col-12 mt-2 ">
+				<summary>Personnalisations de style avancées</summary>
+				<div class="row">
+					<label class="col-6 mb-3">
+						Police de caractères du texte
+						<input
+							type="text"
+							class="form-control"
+							bind:value={config.font}
+							placeholder="Arial, Helvetica, Garamond, ..."
+						/>
+					</label>
+					<label class="col-6 mb-3">
+						Taille du texte
+						<input
+							type="text"
+							class="form-control"
+							bind:value={config.font_size}
+							placeholder="12"
+						/>
+					</label>
+					<div class="form-floating col-12  font-monospace text-muted">
+						<textarea
+							bind:value={config.custom_css}
+							class="form-control"
+							placeholder={'body {\n  background-color: aliceblue;\n}'}
+							id="customcss"
+							style="height: 7em"
+						/>
+						<label for="customcss">Code CSS personnalisé</label>
+					</div>
+					<SoundPicker
+						label="Son émis lors de l'acceptation d'un pass"
+						sound_on_undefined="valid.mp3"
+						bind:selected_sound={config.sound_valid}
+						sounds={[
+							{ name: 'auncun', asset: null },
+							{ name: 'ding', asset: undefined },
+							{ name: 'tulut', asset: 'tulut.mp3' },
+							{ name: 'tin-liiin', asset: 'tin-lin.mp3' },
+							{ name: 'plop', asset: 'plop.mp3' }
+						]}
+					/>
+					<SoundPicker
+						label="Son émis lors du refus d'un pass"
+						sound_on_undefined="invalid.mp3"
+						bind:selected_sound={config.sound_invalid}
+						sounds={[
+							{ name: 'auncun', asset: null },
+							{ name: 'bong-bong-bong', asset: undefined },
+							{ name: 'bong', asset: 'bong.mp3' },
+							{ name: 'hein', asset: 'hein.mp3' }
+						]}
+					/>
+				</div>
+			</details>
 		</div>
 	</fieldset>
+	<fieldset class="col-md-12">
+		<legend>Durée d'attente…</legend>
+
+		<div class="row">
+			{#if !video_scan_num}
+				<div class="form-label col-xl-4">
+					<label for="wait">…avant la validation du code saisi</label>
+					<div class="input-group">
+						<input
+							type="number"
+							step="0.01"
+							class="form-control"
+							placeholder="1"
+							id="wait"
+							title="Temps de lecture du code par le lecteur de QR code physique"
+							bind:value={config.decode_after_s}
+						/>
+						<div class="input-group-text">secondes</div>
+					</div>
+				</div>
+			{/if}
+			<div
+				class="form-label col-xl-4"
+				title="Temps d'affichage du message d'acceptation ou de refus du passe"
+			>
+				<label for="back">…avant le retour à l'interface de scan</label>
+				<div class="input-group">
+					<input
+						type="number"
+						step="0.1"
+						class="form-control"
+						placeholder="4"
+						id="back"
+						bind:value={config.reset_after_s}
+					/>
+					<div class="input-group-text">secondes</div>
+				</div>
+			</div>
+			<div
+				class="form-label col-xl-4"
+				title="Une fois qu'un passe a été validé, il ne peut pas être réutilisé pendant cette durée, pour éviter que plusieurs personnes ne scannent le même passe."
+			>
+				<label for="norevalidation">...avant réutilisation du même passe</label>
+				<div class="input-group">
+					<input
+						type="number"
+						class="form-control"
+						placeholder="pas de revalidation avant:"
+						id="norevalidation"
+						bind:value={config.prevent_revalidation_before_minutes}
+					/>
+					<div class="input-group-text">minutes</div>
+				</div>
+			</div>
+		</div>
+	</fieldset>
+
 	<details>
-		<summary>Requêtes HTTP externe</summary>
+		<summary>Interfaçage avec des services externes via <i>HTTP</i></summary>
 		<ExternalRequestsConfig bind:external_requests={config.external_requests} />
 	</details>
 
+	<details class="p-2">
+		<summary>Statistiques</summary>
+		<p>
+			Sanipasse borne a la capacité de stocker localement des statistiques anonymes sur le nombre de
+			passes validés ou refusés au cours du temps. Ces statistiques ne contiennent aucune
+			information personnelle, fonctionnent hors ligne, et ne sont pas envoyées au serveur de
+			sanipasse.
+		</p>
+		<p>
+			Si vous êtes un commerçant soumis au contrôle obligatoire du passe sanitaire, lors d'un
+			contrôle, la police peut vous demander de fournir ces statistiques.
+		</p>
+		<label>
+			<input type="checkbox" bind:checked={config.store_statistics} />
+			Enregistrer les statistiques d'utilisation
+		</label>
+
+		<p class="my-2">
+			Une fois collectées, les statistiques seront visibles depuis la
+			<a href="/borne/statistiques">page de visualisation des statistiques</a>. Vous avez également
+			la possibilité de donner accès aux statistiques aux visiteurs en ajoutant un bouton
+			d'affichage des statistiques sur l'interface de scan.
+		</p>
+
+		<label>
+			<input type="checkbox" bind:checked={config.show_statistics_on_scan} />
+			Donner accès aux statistiques depuis l'interface de scan
+		</label>
+	</details>
+
+	<ShowPromiseError promise={uploadConfigPromise} />
+
+	<button
+		class="btn btn-outline-primary col-md-5 mt-6 mx-2"
+		disabled={loading}
+		on:click|preventDefault={uploadConfig}
+		title="Enregistrer ces paramètres sur le serveur de sanipasse pour pouvoir y accéder depuis un autre appareil"
+		>Sauvegarder ces paramètres en ligne</button
+	>
 	<input
 		type="submit"
-		class="btn btn-primary col-md-6 offset-md-6 mt-6"
+		class="btn btn-primary col-md-5 mt-6 mx-2"
 		disabled={loading}
-		value={loading ? 'Chargement' : 'Démarrer'}
+		title="Sauvegarder les paramètres localement sur ce navigateur, et lancer l'interface de contrôle des passes sanitaires avec cette configuration"
+		value={loading ? 'Chargement' : "Lancer l'interface de scan localement"}
 	/>
 </form>
 

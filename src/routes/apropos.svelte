@@ -5,27 +5,34 @@
 
 <p>Bonjour ! 👋</p>
 <p>
-	Moi c'est <a href="https://ophir.dev">Ophir</a>, et je suis fier de vous présenter l'application
-	de vérification de passes sanitaires <a href="https://sanipasse.fr">sanipasse</a>.
+	Moi c'est <a href="https://ophir.dev">Ophir</a>, et je suis l'auteur de
+	<a href="https://sanipasse.fr">sanipasse</a>, l'application libre de vérification de passes
+	sanitaires.
 </p>
 <p>
-	Vous trouverez sur cette page des explications sur comment lire des certificats de test et de
-	vaccination, organiser des événements zéro-COVID, la description du fonctionnement interne de
-	l'application, des informations sur sa sécurité et la gestion des données personnelles, ainsi que
-	les mentions légales.
+	Vous trouverez sur cette page des explications sur comment lire et contrôler des certificats de
+	test et de vaccination, organiser des événements zéro-COVID, la description du fonctionnement
+	interne de l'application, des informations sur sa sécurité et la gestion des données personnelles,
+	ainsi que les mentions légales.
 </p>
 
 <h2 id="tuto">🤔 Comment utiliser Sanipasse</h2>
 
-<p>Sanipasse est un logiciel libre qui a deux fonctions principales:</p>
+<p>Sanipasse est un logiciel libre qui a trois fonctions principales:</p>
 <ul>
 	<li>
-		la création de <i>listes d'invités</i> qui peuvent confirmer eux-mêmes leur présence en scannant
-		leur passe sanitaire,
+		la <a href="/events">création de <b>listes d'invités</b></a> qui peuvent confirmer eux-mêmes leur
+		présence en scannant leur passe sanitaire,
 	</li>
 	<li>
-		et la <i>lecture de vos propres certificats</i>, pour vérifier les informations qu'ils
-		contiennent.
+		la <a href="/import/video"><b>lecture</b> de vos propres certificats</a>, pour vérifier les
+		informations qu'ils contiennent,
+	</li>
+	<li>
+		la mise en place de
+		<a href="/borne/config"><b>bornes autonomes</b> de contrôle des passes sanitaires</a>
+		destinées aux professionnels, sous forme d'une alternative à TousAntiCovid-Vérif plus efficace, plus
+		configurable, et plus respectueuse de la vie privée.
 	</li>
 </ul>
 
@@ -67,6 +74,12 @@
 </ol>
 <h3 id="securite">🔑 Sécurité</h3>
 <p>
+	La connexion à sanipasse ne peut se faire qu'en https. Les données échangées entre votre
+	ordinateur et sanipasse ne peuvent pas être interceptées ni modifiées par un tiers. La connexion
+	se fait directement au serveur de sanipasse en France, il n'y a pas d'intermédiaire (de type CDN)
+	entre vous et le serveur habilité qui héberge l'application.
+</p>
+<p>
 	Les certificats de test ou de vaccination contiennent une
 	<a href="https://fr.wikipedia.org/wiki/Signature_num%C3%A9rique">signature numérique</a>, ce qui
 	empêche de les contrefaire. Si quelqu'un essaie de modifier un certificat existant ou d'en créer
@@ -79,17 +92,22 @@
 	Sanipasse restreint son utilisation des données personnelles au <b>strict minimum</b>.
 </p>
 <p>
-	Lorsque vous chargez un passe sanitaire <b>depuis la page d'accueil</b>, il reste sur votre
-	ordinateur, et n'est pas envoyé au serveur de sanipasse.
+	Lorsque vous chargez un passe sanitaire <b>depuis la page d'accueil</b>, ou depuis
+	<a href="/borne/config">sanipasse borne</a>, il reste sur votre appareil, et n'est pas envoyé au
+	serveur de sanipasse. Il est vérifié localement à partir des informations contenues dans le passe
+	lui-même et des règles officielles de validité des preuves d'immunité en vigueur en France. Sa
+	signature numérique est vérifiée à partir de la même liste de clefs publiques que celle utilisée
+	dans l'application TousAntiCovid-Vérif.
 </p>
 <p>
 	Lorsque vous chargez un passe sanitaire <b>en réponse à une invitation à un évènement</b>, et que
 	vous choisissez explicitement de l'envoyer, il est envoyé au serveur
-	<i>uniquement pour vérifier sa validité</i>. Une fois la validité vérifiée (en quelques
-	millisecondes), il est <i>immédiatement supprimé</i>. Nous ne gardons ensuite aucune trace des
-	informations sensibles, et conservons uniquement une donnée binaire: si oui ou non l'invitation
-	qui vous a été envoyée a été validée. Seule cette validation est visible par l'organisateur de
-	l'évènement. Aucun humain n'a ainsi accès aux informations contenues dans votre passe sanitaire.
+	<i>uniquement pour vérifier sa validité</i>. Il n'est jamais stocké de manière persistante sur le
+	serveur, et une fois la validité vérifiée (en quelques millisecondes), il est
+	<i>immédiatement supprimé</i> de la mémoire. Nous ne gardons ensuite aucune trace des informations
+	sensibles, et conservons uniquement une donnée binaire: si oui ou non l'invitation qui vous a été envoyée
+	a été validée. Seule cette validation est visible par l'organisateur de l'évènement. Aucun humain n'a
+	ainsi accès aux informations contenues dans votre passe sanitaire.
 </p>
 <p>
 	Pour toute demande concernant la gestion de la vie privée dans sanipasse (information, demande de
@@ -124,25 +142,17 @@ Ophir LOJKINE
 84 rue de Charenton, 75012 Paris
 contact@ophir.dev
 </pre>
-<h4>🇪🇺 Hébergeur</h4>
+<h4>🇪🇺🇫🇷 Hébergeur</h4>
 <p>
-	Site hébergé par
-	<a href="https://www.hetzner.com/rechtliches/impressum">Hetzner</a>
-	(<a href="mailto:info@hetzner.com">info@hetzner.com</a>).
+	Ce site est hébergé dans un datacenter situé à Nevers, qui est en cours de certification
+	<a href="https://fr.wikipedia.org/wiki/ISO/CEI_27001">ISO 27001</a>
+	et
+	<a href="https://esante.gouv.fr/labels-certifications/hebergement-des-donnees-de-sante">HDS</a>.
 </p>
-<pre>
-Hetzner Online GmbH
-Industriestr. 25
-91710 Gunzenhausen
-Germany
-
-Tel.: +49 (0)9831 505-0*
-Fax: +49 (0)9831 505-3
-
-Ansbach Registration Office, HRB 6089
-VAT Reg. No. DE 812871812
-CEO: Martin Hetzner, Stephan Konvickova, Günther Müller
-</pre>
+<p>
+	Responsable de la protection des données et référent RGPD du datacenter:
+	<a href="mailto:c.brida@vsprod.net">Christophe Brida</a>.
+</p>
 
 <h3 id="cookies">🍪 Cookies</h3>
 <p>
@@ -152,9 +162,23 @@ CEO: Martin Hetzner, Stephan Konvickova, Günther Müller
 
 <h2>📝 Code source</h2>
 <p>
-	Cette application est un logiciel libre, sous license <a href="/LICENSE">AGPL</a>. Vous pouvez
+	Cette application est un logiciel libre, sous licence <a href="/licence">AGPLv3</a>. Vous pouvez
 	lire et télécharger son
-	<a href="https://github.com/lovasoa/sanipasse">code source sur Github</a>.
+	<a href="https://github.com/lovasoa/sanipasse">code source sur Github</a>. La licence AGPLv3 vous
+	permet de d'utiliser le logiciel et de le modifier librement quels que soient vos besoins, mais
+	vous demande notamment&nbsp;:
+</p>
+<ul>
+	<li>d'informer vos utilisateurs que vous utilisez le logiciel, et de sa licence,</li>
+	<li>
+		si vous créez une solution plus large qui utilise le logiciel, de publier à votre tour tout
+		votre code sous une licence libre compatible.
+	</li>
+</ul>
+
+<p>
+	Pour plus d'informations sur la licence, ou pour demander une exception pour vos besoins, vous
+	pouvez <a href="mailto:contact@ophir.dev?subject=licence sanipasse">me contacter</a>.
 </p>
 
 <h3>Auto-hébergement</h3>

@@ -1,5 +1,3 @@
-const localforage = import('localforage'); // Can fail on node
-
 export interface HTTPRequest {
 	method: string;
 	url: string;
@@ -24,9 +22,18 @@ export interface ConfigProperties {
 	video_scan?: boolean;
 	font?: string;
 	font_size?: number;
+	custom_css?: string;
 	video_facing_mode?: string;
 	external_requests?: ExternalRequests;
 	anonymize?: boolean;
+	// For backwards compatibility, a missing sound is interpreted the default sound,
+	// whereas a sound explicitly set to null is interpreted as no sound.
+	sound_valid?: string | null;
+	sound_invalid?: string | null;
+	// Whether to store statistics about the validated and invalidated scans
+	store_statistics?: boolean;
+	// Whether to show the statistics on the scan page
+	show_statistics_on_scan?: boolean;
 }
 
 export const DEFAULT_CONFIG: ConfigProperties = {
@@ -42,23 +49,6 @@ export const DEFAULT_CONFIG: ConfigProperties = {
 	bottom_infos: 'logiciel sanipasse.fr fourni par Ophir Lojkine sous licence AGPLv3.',
 	anonymize: false,
 	prevent_revalidation_before_minutes: 0,
-	video_scan: true
+	video_scan: true,
+	store_statistics: true
 };
-
-const STORAGE_KEY = 'borne_config';
-
-export async function save_config(config: ConfigProperties) {
-	if (typeof window !== 'object') return;
-	await (await localforage).setItem(STORAGE_KEY, config);
-}
-
-export async function load_config(): Promise<ConfigProperties> {
-	if (typeof window !== 'object') return DEFAULT_CONFIG;
-	try {
-		const config = await (await localforage).getItem(STORAGE_KEY);
-		return (config as ConfigProperties) || DEFAULT_CONFIG;
-	} catch (e) {
-		console.error('Unable to load config', e);
-		return DEFAULT_CONFIG;
-	}
-}

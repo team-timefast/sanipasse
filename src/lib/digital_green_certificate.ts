@@ -97,6 +97,13 @@ export class InvalidCertificateError extends Error {
 	}
 }
 
+// Flags indicating known certificate mistakes
+export interface DGCMistakes {
+	name_reversed: boolean;
+	latin_not_icao: boolean;
+	dob_not_iso: boolean;
+}
+
 // As per https://ec.europa.eu/health/sites/default/files/ehealth/docs/digital-green-certificates_v3_en.pdf
 // Section 2.6.3
 const CWT_CLAIMS = Object.freeze({
@@ -136,9 +143,20 @@ async function parseDGCFromCoseData(rawCoseData: Uint8Array): Promise<RawDGC> {
 	/**
 	 * Get a Verifier given a kid
 	 */
-	async function verifierFn(kid_bytes: Uint8Array): Promise<Verifier> {
+	async function verifierFn(kid_bytes: Uint8Array, algorithm: Algorithm): Promise<Verifier> {
 		kid = encodeb64(kid_bytes);
 		certificate = await findDGCPublicKey(kid);
+		// RSA public keys can be used with both RSA-PSS and RSASSA-PKCS1-v1_5,
+		// but subtlecrypto refuses to run the signature check if the algorithm
+		// specified when creating the CryptoKey object
+		// is not the same as the one used to sign the data.
+		if (
+			typeof certificate.publicKeyAlgorithm === 'object' &&
+			certificate.publicKeyAlgorithm.name.startsWith('RSA') &&
+			algorithm.name.startsWith('RSA')
+		) {
+			certificate.publicKeyAlgorithm.name = algorithm.name;
+		}
 		const key = await getCertificatePublicKey(certificate);
 		return { key };
 	}
@@ -200,10 +218,14 @@ async function getCertificatePublicKey({
 
 function getCertificateInfo(cert: DGC): CommonCertificateInfo {
 	const hcert = cert.hcert;
+	let dob = hcert.dob;
+	if (dob.search(/^(\d\d\.){2}(19|20)\d\d$/) != -1) {
+		dob = dob.split('.').reverse().join('-');
+	}
 	const common = {
 		first_name: hcert.nam.gn || (hcert.nam.gnt || '-').replace(/</g, ' '),
 		last_name: hcert.nam.fn || hcert.nam.fnt.replace(/</g, ' '),
-		date_of_birth: new Date(hcert.dob),
+		date_of_birth: new Date(dob),
 		code: cert.code,
 		source: { format: 'dgc', cert }
 	} as const;
@@ -243,4 +265,25 @@ export async function parse(code: string): Promise<CommonCertificateInfo> {
 	const rawCoseData = await extractCoseFromQRCode(code);
 	const dgc = await parseDGCFromCoseData(rawCoseData);
 	return getCertificateInfo({ ...dgc, code });
+}
+
+/**
+ * Function to correct known mistakes in the certificates
+ * Currently used for Ukraine and for name substructure only
+ * Add more exceptions if they appear
+ *
+ * Ukrainian certificates had several mistakes to them:
+	- issued before 2021-08-26 had a mistake with name and surname fields reversed
+	- issued before 2021-08-25 had latin name versions not capitalized
+	- issued before 2021-08-25 had dd.mm.yyyy DOB date format
+*/
+export function certificateMistakes(dcg: RawDGC): DGCMistakes {
+	return {
+		latin_not_icao:
+			(!!dcg.hcert.nam.fnt && dcg.hcert.nam.fnt.search(/^[A-Z<]*$/) == -1) ||
+			(!!dcg.hcert.nam.gnt && dcg.hcert.nam.gnt.search(/^[A-Z<]*$/) == -1),
+		dob_not_iso: dcg.hcert.dob.search(/^((19|20)\d\d(-\d\d){0,2}){0,1}$/) == -1,
+		name_reversed:
+			dcg.issuer == 'UA' && !!dcg.issuedAt && new Date(dcg.issuedAt * 1000) < new Date(2021, 7, 26)
+	};
 }

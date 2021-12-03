@@ -4,7 +4,9 @@
 	import { assets } from '$app/paths';
 	import type { ConfigProperties, HTTPRequest } from './_config';
 	import QrCodeVideoReader from '../_QrCodeVideoReader.svelte';
-	import { onDestroy } from 'svelte';
+	import { sha256 } from '$lib/sha256';
+	import { store_statistics_datapoint } from './_stats_storage';
+	import ScanStatsModal from './_scan_stats_modal.svelte';
 
 	export let config: ConfigProperties;
 	const { decode_after_s, reset_after_s, prevent_revalidation_before_minutes } = config;
@@ -12,52 +14,26 @@
 	let code: string = '';
 	let codeFoundPromise: Promise<CommonCertificateInfo> | undefined = undefined;
 
-	//let timeout: NodeJS.Timeout | undefined = undefined;
+	let timeout: NodeJS.Timeout | undefined = undefined;
 	let reset_timeout: NodeJS.Timeout | undefined = undefined;
-	let scanning = false;
-
-	interface PassHistory {
-		first_name: string;
-		last_name: string;
-		date_of_birth: Date;
-		validated: boolean;
-		visible: boolean;
-		date_of_validation: Date;
-	}
-
-	type PassHistoryEntry = PassHistory;
 
 	let last_event: KeyboardEvent | null = null;
+
+	let externalRequest: Promise<Response> | null = null;
+
+	// Passes that have been validated recently and cannot be revalidated
 	let validated_passes: Map<string, number> = new Map();
-	let passes_history: PassHistoryEntry[] = [];
-	const pass_history_clean_interval = setInterval(() => {
-		passes_history = passes_history.filter((passHistoryEntry) => Date.now() - passHistoryEntry.date_of_validation.getTime() < 30000);
-	}, 5000);
 
 	const prevent_revalidation_before_ms = (prevent_revalidation_before_minutes || 0) * 60 * 1000;
 
 	function onKeyPress(event: KeyboardEvent) {
 		last_event = event;
-		if (event.key.length > 1) {
-			launchParsing(code);
-			//code = '';
-			return;
-		}
-		if(scanning == false) {
-			scanning = true;
-			code = '';
-			if(codeFoundPromise) {
-				codeFoundPromise = undefined;
-			}
-		}
+		// Handle event if we are in scanning mode and a single keycode was sent by the scanner
+		if (event.key.length > 1 || codeFoundPromise) return;
 		code += event.key;
-		//if (timeout !== undefined) clearTimeout(timeout);
-		if (reset_timeout !== undefined) {
-			clearTimeout(reset_timeout);
-			reset_timeout = undefined;
-			passes_history[0] = Object.assign(passes_history[0], {visible: true});
-		}
-		//timeout = setTimeout(launchParsing, decode_after_s * 1000, code);
+		if (timeout !== undefined) clearTimeout(timeout);
+		if (reset_timeout !== undefined) clearTimeout(reset_timeout);
+		timeout = setTimeout(launchParsing, decode_after_s * 1000, code);
 		event.preventDefault();
 	}
 
@@ -69,104 +45,90 @@
 	async function validateCertificateCode(code: string): Promise<CommonCertificateInfo> {
 		const cert = await parse_any(code);
 		const error = findCertificateError(cert);
+		if (error) throw new Error(error);
 
-		if (error) {
-                        return {cert, error: new Error(error)};
+		let code_digest = await sha256(code);
+		const last_validated = validated_passes.get(code_digest);
+		const now = Date.now();
+		if (last_validated && now - last_validated < prevent_revalidation_before_ms) {
+			const duration_minutes = ((now - last_validated) / 60 / 1000) | 0;
+			throw new Error(
+				`Passe déjà scanné par quelqu'un d'autre il y a ` +
+					(duration_minutes ? duration_minutes + ' minutes.' : "moins d'une minute.")
+			);
 		}
-		const last_validated = validated_passes.get(code);
-
-		if (last_validated && last_validated > Date.now() - prevent_revalidation_before_ms) {
-			const duration_minutes = ((Date.now() - last_validated) / 60 / 1000) | 0;
-                        return {cert, error: new Error(
-                                `Passe déjà scanné par quelqu'un d'autre il y a ` +
-                                        (duration_minutes ? duration_minutes + ' minutes.' : "moins d'une minute.")
-                        )};
-		}
-		validated_passes.set(code, Date.now());
-		return {cert};
+		validated_passes.set(code_digest, now);
+		setTimeout(() => validated_passes.delete(code_digest), prevent_revalidation_before_ms);
+		return cert;
 	}
 
 	async function makeRequest(r: HTTPRequest) {
-		return fetch(r.url, { method: r.method, body: r.body || undefined });
+		const body = r.method === 'GET' ? undefined : r.body;
+		externalRequest = fetch(r.url, { method: r.method, body });
+		return externalRequest;
 	}
 
 	async function onValid() {
 		if (config.external_requests && config.external_requests.accepted.url)
-			return makeRequest(config.external_requests.accepted);
+			makeRequest(config.external_requests.accepted);
+		if (config.store_statistics) store_statistics_datapoint(true);
 	}
 
 	async function onInvalid() {
 		if (config.external_requests && config.external_requests.refused.url)
-			return makeRequest(config.external_requests.refused);
+			makeRequest(config.external_requests.refused);
+		if (config.store_statistics) store_statistics_datapoint(false);
 	}
 
 	function launchParsing(code_input: string) {
 		if (codeFoundPromise) return;
 		console.log('Detected code before reset: ', code_input);
 		codeFoundPromise = validateCertificateCode(code_input);
-		codeFoundPromise.then(({error, cert}) => {
-			let data: PassHistoryEntry = {
-				first_name: cert.first_name,
-				last_name: cert.last_name,
-				date_of_birth: cert.date_of_birth,
-				validated: false,
-				visible: false,
-				date_of_validation: new Date(Date.now())
-			};
-			if(error == undefined) {
-				data = Object.assign(data, {validated: true});
-				onValid();
-			} else {
-				data = Object.assign(data, {validated: false});
-				onInvalid();
-			}
-			passes_history = [data, ...passes_history].slice(0, 4);
-			reset_timeout = setTimeout(() => {
-				codeFoundPromise = undefined;
-				passes_history[0] = Object.assign(passes_history[0], {visible: true});
-			}, reset_after_s * 1000);
-		});
-		//timeout = undefined;
+		codeFoundPromise.then(onValid, onInvalid);
+		timeout = undefined;
 		code = '';
-		scanning = false;
+		reset_timeout = setTimeout(() => {
+			codeFoundPromise = undefined;
+		}, reset_after_s * 1000);
 	}
 
-	function showName({ first_name, last_name, date_of_birth }: CommonCertificateInfo): string {
+	function showName({ first_name, last_name }: CommonCertificateInfo): string {
 		return (
 			(first_name[0] || '').toUpperCase() +
 			first_name.slice(1).toLowerCase() +
 			' ' +
-			last_name.toUpperCase() +
-			' né(e) le ' +
-			date_of_birth.toLocaleDateString("fr")
+			last_name.toUpperCase()
 		);
 	}
-
-	onDestroy(() => clearInterval(pass_history_clean_interval));
 </script>
 
 <svelte:window on:keypress={onKeyPress} on:paste={onPaste} />
+<svelte:head>
+	{#if config.custom_css}
+		<link rel="stylesheet" href="data:text/css,{encodeURIComponent(config.custom_css)}" />
+	{/if}
+</svelte:head>
 
 <div
 	class="main container"
 	style="font-family: {config.font || 'inherit'}; font-size: {config.font_size || 16}px"
 >
-
-	{#if scanning !== false}
+	{#if timeout !== undefined}
 		Scan du QR code en cours...
 	{:else if codeFoundPromise != undefined}
 		{#await codeFoundPromise}
 			Décodage du code...
-		{:then passOrErr}
-                    {#if passOrErr.error == undefined}
-			<!-- svelte-ignore a11y-media-has-caption -->
-			<audio autoplay src="{assets}/valid.mp3" />
-			<div class="alert alert-success" role="alert">
+		{:then pass}
+			{#if config.sound_valid !== null}
+				<!-- svelte-ignore a11y-media-has-caption -->
+				<audio autoplay src="{assets}/{config.sound_valid || 'valid.mp3'}" />
+			{/if}
+			<div class="validated_pass alert alert-success" role="alert">
 				<div class="row">
 					<div class="col-md-2"><div class="sign shallpass" /></div>
 					<div class="col-md-10">
 						<h3>
-							Bienvenue, {#if !config.anonymize}{showName(passOrErr.cert)}{/if}
+							Bienvenue, {#if !config.anonymize}{showName(pass)}{/if}
 						</h3>
 						<p>Votre passe est validé.</p>
 						<div class="progress">
@@ -179,15 +141,17 @@
 					</div>
 				</div>
 			</div>
-		    {:else}
-			<!-- svelte-ignore a11y-media-has-caption -->
-			<audio autoplay src="{assets}/invalid.mp3" />
-			<div class="alert alert-danger" role="alert">
+		{:catch err}
+			{#if config.sound_invalid !== null}
+				<!-- svelte-ignore a11y-media-has-caption -->
+				<audio autoplay src="{assets}/{config.sound_invalid || 'invalid.mp3'}" />
+			{/if}
+			<div class="refused_pass alert alert-danger" role="alert">
 				<div class="row">
 					<div class="col-md-2"><div class="sign shallnotpass" /></div>
 					<div class="col-md-10">
 						<h3>Passe sanitaire invalide</h3>
-						<p class="font-monospace">{passOrErr.error.message}</p>
+						<p class="font-monospace">{err.message}</p>
 						<div class="progress">
 							<div
 								class="progress-bar bg-danger animate"
@@ -198,32 +162,23 @@
 					</div>
 				</div>
 			</div>
-                    {/if}
 		{/await}
 	{:else}
-		<div class="row justify-content-center w-100">
-			{#each config.logo_urls as url}
-				<img alt="logo" src={url} class="col" style="object-fit: contain; max-height: 10em;" />
-			{/each}
-		</div>
-
-		<h1>{config.title}</h1>
-		<p>{config.description}</p>
-	{/if}
-
-	{#each passes_history as passHistoryEntry}
-		{#if passHistoryEntry.visible}
-			<div class="alert {passHistoryEntry.validated ? 'alert-success' : 'alert-danger'}" role="alert">
-					<div class="row">
-							<div class="col-md-2"><div class="sign {passHistoryEntry.validated ? 'shallpass' : 'shallnotpass'}" /></div>
-							<div class="col-md-10">
-									<h3>{showName(passHistoryEntry)}</h3>
-									<p class="font-monospace">Date du scan : {passHistoryEntry.date_of_validation.toLocaleString("fr")}</p>
-							</div>
-					</div>
+		<section id="welcome_message">
+			<div class="logos row justify-content-center w-100">
+				{#each config.logo_urls as url}
+					<img
+						alt="logo"
+						src={url}
+						class="logo col"
+						style="object-fit: contain; max-height: 10em;"
+					/>
+				{/each}
 			</div>
-		{/if}
-	{/each}
+			<h1>{config.title}</h1>
+			<p class="description">{config.description}</p>
+		</section>
+	{/if}
 
 	{#if config.video_scan}
 		<div class="videoinput w-100" style="display: {codeFoundPromise ? 'none' : 'flex'}">
@@ -240,15 +195,33 @@
 			<p class="text-break font-monospace">{code}</p>
 			<p>Code length: {code.length}</p>
 			<p>Last key pressed: {JSON.stringify(last_event?.key, null, ' ')}</p>
-			<p>Scanning: {scanning ? 'yes' : 'no'}</p>
-			<p>Historique : {JSON.stringify(passes_history)}</p>
 		</div>
+		{#if externalRequest}
+			<div>
+				{#await externalRequest}
+					Requête externe en cours...
+				{:then r}
+					status: {r.status}
+					{r.statusText}
+					{#await r.text() then text}
+						body: {text}
+					{/await}
+				{:catch err}
+					Erreur dans la requête externe:
+					<pre>{err}</pre>
+				{/await}
+			</div>
+		{/if}
 	{/if}
 
 	<p class="fixed-bottom text-muted fw-lighter fst-italic" style="font-size: .8em">
 		{config.bottom_infos}
 	</p>
 </div>
+
+{#if config.show_statistics_on_scan}
+	<ScanStatsModal />
+{/if}
 
 <style>
 	.progress-bar {
