@@ -7,12 +7,13 @@
 	import { sha256 } from '$lib/sha256';
 	import { store_statistics_datapoint } from './_stats_storage';
 	import ScanStatsModal from './_scan_stats_modal.svelte';
+	import { onDestroy } from 'svelte';
 
 	export let config: ConfigProperties;
 	const { decode_after_s, reset_after_s, prevent_revalidation_before_minutes } = config;
 
 	let code: string = '';
-	let codeFoundPromise: Promise<CommonCertificateInfo> | undefined = undefined;
+	let codeFoundPromise: Promise<PassHistory> | undefined = undefined;
 
 	let timeout: NodeJS.Timeout | undefined = undefined;
 	let reset_timeout: NodeJS.Timeout | undefined = undefined;
@@ -20,6 +21,19 @@
 	let last_event: KeyboardEvent | null = null;
 
 	let externalRequest: Promise<Response> | null = null;
+
+	interface PassHistory {
+			cert: CommonCertificateInfo;
+			validated: boolean;
+			error: string | undefined;
+			visible: boolean;
+			date_of_validation: Date;
+	}
+
+	let passes_history: PassHistory[] = [];
+	const pass_history_clean_interval = setInterval(() => {
+			passes_history = passes_history.filter((passHistoryEntry) => Date.now() - passHistoryEntry.date_of_validation.getTime() < 30000);
+	}, 5000);
 
 	// Passes that have been validated recently and cannot be revalidated
 	let validated_passes: Map<string, number> = new Map();
@@ -42,10 +56,10 @@
 		launchParsing(clipboardData.getData('text'));
 	}
 
-	async function validateCertificateCode(code: string): Promise<CommonCertificateInfo> {
+	async function validateCertificateCode(code: string): Promise<PassHistory> {
 		const cert = await parse_any(code);
 		const error = findCertificateError(cert);
-		if (error) throw new Error(error);
+		//if (error) throw new Error(error);
 
 		let code_digest = await sha256(code);
 		const last_validated = validated_passes.get(code_digest);
@@ -59,7 +73,7 @@
 		}
 		validated_passes.set(code_digest, now);
 		setTimeout(() => validated_passes.delete(code_digest), prevent_revalidation_before_ms);
-		return cert;
+		return ({error, validated: error === undefined, date_of_validation: new Date(), visible: false, cert});
 	}
 
 	async function makeRequest(r: HTTPRequest) {
@@ -83,23 +97,40 @@
 	function launchParsing(code_input: string) {
 		if (codeFoundPromise) return;
 		console.log('Detected code before reset: ', code_input);
-		codeFoundPromise = validateCertificateCode(code_input);
-		codeFoundPromise.then(onValid, onInvalid);
+
+		codeFoundPromise = validateCertificateCode(code_input).then((ph) => {
+			passes_history = [ph, ...passes_history].slice(0, 4);
+			if(ph.validated) {
+				onValid();
+			} else {
+				throw ph.error;
+			}
+			return ph;
+		}).catch((err) => {
+			onInvalid();
+			throw err;
+		});
+		//codeFoundPromise.then(onValid, onInvalid);
 		timeout = undefined;
 		code = '';
 		reset_timeout = setTimeout(() => {
 			codeFoundPromise = undefined;
+			passes_history[0] = Object.assign(passes_history[0], {visible: true});
 		}, reset_after_s * 1000);
 	}
 
-	function showName({ first_name, last_name }: CommonCertificateInfo): string {
+	function showName({ first_name, last_name, date_of_birth }: CommonCertificateInfo): string {
 		return (
 			(first_name[0] || '').toUpperCase() +
 			first_name.slice(1).toLowerCase() +
 			' ' +
-			last_name.toUpperCase()
+			last_name.toUpperCase() +
+			' né(e) le ' +
+			date_of_birth.toLocaleDateString("fr")
 		);
 	}
+
+	onDestroy(() => clearInterval(pass_history_clean_interval));
 </script>
 
 <svelte:window on:keypress={onKeyPress} on:paste={onPaste} />
@@ -128,7 +159,7 @@
 					<div class="col-md-2"><div class="sign shallpass" /></div>
 					<div class="col-md-10">
 						<h3>
-							Bienvenue, {#if !config.anonymize}{showName(pass)}{/if}
+							Bienvenue, {#if !config.anonymize}{showName(pass.cert)}{/if}
 						</h3>
 						<p>Votre passe est validé.</p>
 						<div class="progress">
@@ -179,6 +210,20 @@
 			<p class="description">{config.description}</p>
 		</section>
 	{/if}
+
+	{#each passes_history as passHistoryEntry}
+		{#if passHistoryEntry.visible}
+			<div class="alert {passHistoryEntry.validated ? 'alert-success' : 'alert-danger'}" role="alert">
+				<div class="row">
+					<div class="col-md-2"><div class="sign {passHistoryEntry.validated ? 'shallpass' : 'shallnotpass'}" /></div>
+					<div class="col-md-10">
+						<h3>{passHistoryEntry.cert.first_name} {passHistoryEntry.cert.last_name} né(e) le {passHistoryEntry.cert.date_of_birth.toLocaleDateString("fr")}</h3>
+						<p class="font-monospace">Date du scan : {passHistoryEntry.date_of_validation.toLocaleString("fr")}</p>
+					</div>
+				</div>
+			</div>
+		{/if}
+	{/each}
 
 	{#if config.video_scan}
 		<div class="videoinput w-100" style="display: {codeFoundPromise ? 'none' : 'flex'}">
