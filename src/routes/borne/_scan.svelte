@@ -108,7 +108,7 @@
 			if(ph.validated) {
 				onValid();
 			} else {
-				throw ph.error;
+				throw new Error(ph.error);
 			}
 			return ph;
 		}).catch((err) => {
