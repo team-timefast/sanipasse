@@ -43,10 +43,15 @@
 	function onKeyPress(event: KeyboardEvent) {
 		last_event = event;
 		// Handle event if we are in scanning mode and a single keycode was sent by the scanner
-		if (event.key.length > 1 || codeFoundPromise) return;
+		if (event.key.length > 1/* || codeFoundPromise*/) return;
 		code += event.key;
 		if (timeout !== undefined) clearTimeout(timeout);
-		if (reset_timeout !== undefined) clearTimeout(reset_timeout);
+		if (reset_timeout !== undefined) {
+			clearTimeout(reset_timeout);
+			if(passes_history.length >= 1 && passes_history[0] !== undefined) {
+				passes_history[0] = Object.assign(passes_history[0], {visible: true});
+			}
+		}
 		timeout = setTimeout(launchParsing, decode_after_s * 1000, code);
 		event.preventDefault();
 	}
@@ -95,7 +100,7 @@
 	}
 
 	function launchParsing(code_input: string) {
-		if (codeFoundPromise) return;
+		//if (codeFoundPromise) return;
 		console.log('Detected code before reset: ', code_input);
 
 		codeFoundPromise = validateCertificateCode(code_input).then((ph) => {
@@ -115,7 +120,9 @@
 		code = '';
 		reset_timeout = setTimeout(() => {
 			codeFoundPromise = undefined;
-			passes_history[0] = Object.assign(passes_history[0], {visible: true});
+			if(passes_history.length >= 1 && passes_history[0] !== undefined) {
+				passes_history[0] = Object.assign(passes_history[0], {visible: true});
+			}
 		}, reset_after_s * 1000);
 	}
 
