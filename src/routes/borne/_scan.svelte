@@ -8,6 +8,7 @@
 	import ValidationMessage from './_validationMessage.svelte';
 	import Slideshow from './_slideshow.svelte';
 	import ConnectionIndicator from './_connectionIndicator.svelte';
+	import { onDestroy } from 'svelte';
 
 	export let config: ConfigProperties;
 	export let last_update = new Date();
@@ -16,7 +17,7 @@
 	const { decode_after_s, reset_after_s, prevent_revalidation_before_minutes } = config;
 
 	let code: string = '';
-	let codeFoundPromise: Promise<PassHistory> | undefined = undefined;
+	let codeFoundPromise: Promise<CommonCertificateInfo> | undefined = undefined;
 
 	let timeout: NodeJS.Timeout | undefined = undefined;
 	let reset_timeout: NodeJS.Timeout | undefined = undefined;
@@ -71,7 +72,12 @@
 			console.error('Unknown validation ruleset:', config.validation_ruleset);
 			rules = PASS_VALIDITY_RULES.tousAntiCovidDefaultRules;
 		}
-		rules.checkCertificate(cert);
+		let error: string | undefined = undefined;
+		try {
+			rules.checkCertificate(cert);
+		} catch(e) {
+			error = (e as Error).message;
+		}
 		let code_digest = cert.fingerprint;
 		const last_validated = validated_passes.get(code_digest);
 		const now = Date.now();
@@ -85,6 +91,7 @@
 		validated_passes.set(code_digest, now);
 		setTimeout(() => validated_passes.delete(code_digest), prevent_revalidation_before_ms);
 		return ({error, validated: error === undefined, date_of_validation: new Date(), visible: false, cert});
+		//return cert;
 	}
 
 	async function makeRequest(r: HTTPRequest) {
@@ -108,7 +115,6 @@
 	function launchParsing(code_input: string) {
 		//if (codeFoundPromise) return;
 		console.log('Detected code before reset: ', code_input);
-
 		codeFoundPromise = validateCertificateCode(code_input).then((ph) => {
 			passes_history = [ph, ...passes_history].slice(0, 4);
 			if(ph.validated) {
@@ -116,7 +122,7 @@
 			} else {
 				throw new Error(ph.error);
 			}
-			return ph;
+			return ph.cert;
 		}).catch((err) => {
 			onInvalid();
 			throw err;
@@ -131,6 +137,9 @@
 			}
 		}, reset_after_s * 1000);
 	}
+
+	onDestroy(() => clearInterval(pass_history_clean_interval));
+
 </script>
 
 <svelte:window on:keypress={onKeyPress} on:paste={onPaste} />
