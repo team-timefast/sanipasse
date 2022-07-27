@@ -8,8 +8,9 @@
 	import type { StatsDataPoint } from './_stats_storage';
 	import { onMount } from 'svelte';
 
-	import { load_config } from './_config_storage';
+	import { load_config } from './config/_config_storage';
 	import StatsChart from './_stats_chart.svelte';
+	import TooltipFix from '$lib/TooltipFix.svelte';
 
 	export let with_interactions = true;
 
@@ -113,6 +114,20 @@
 {/await}
 
 <StatsChart {datapoints} show_toolbar={with_interactions} />
+
+<p>
+	Vous utilisez actuellement Sanipasse
+
+	<TooltipFix>
+		<i slot="target">v{process.env.SANIPASSE_VERSION}</i>
+		version {process.env.SANIPASSE_VERSION}, itération du {new Date(
+			process.env.SANIPASSE_BUILD_DATE || 0
+		).toLocaleString('fr')}
+	</TooltipFix>
+	. Sanipasse est un logiciel libre, distribué gratuitement par <i>Ophir Lojkine</i> sous la license
+	publique générale AGPLv3.
+</p>
+
 <table class="table">
 	<colgroup>
 		<col span="1" style="width: 45%;" />

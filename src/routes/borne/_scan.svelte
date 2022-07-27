@@ -1,15 +1,18 @@
 <script lang="ts">
 	import type { CommonCertificateInfo } from '$lib/common_certificate_info';
-	import { findCertificateError, parse_any } from '$lib/detect_certificate';
-	import { assets } from '$app/paths';
-	import type { ConfigProperties, HTTPRequest } from './_config';
+	import { PASS_VALIDITY_RULES, parse_any } from '$lib/detect_certificate';
+	import type { ConfigProperties, HTTPRequest } from './config/_config';
 	import QrCodeVideoReader from '../_QrCodeVideoReader.svelte';
-	import { sha256 } from '$lib/sha256';
 	import { store_statistics_datapoint } from './_stats_storage';
 	import ScanStatsModal from './_scan_stats_modal.svelte';
-	import { onDestroy } from 'svelte';
+	import ValidationMessage from './_validationMessage.svelte';
+	import Slideshow from './_slideshow.svelte';
+	import ConnectionIndicator from './_connectionIndicator.svelte';
 
 	export let config: ConfigProperties;
+	export let last_update = new Date();
+	export let last_sync = new Date();
+
 	const { decode_after_s, reset_after_s, prevent_revalidation_before_minutes } = config;
 
 	let code: string = '';
@@ -63,10 +66,13 @@
 
 	async function validateCertificateCode(code: string): Promise<PassHistory> {
 		const cert = await parse_any(code);
-		const error = findCertificateError(cert);
-		//if (error) throw new Error(error);
-
-		let code_digest = await sha256(code);
+		let rules = PASS_VALIDITY_RULES[config.validation_ruleset];
+		if (!rules) {
+			console.error('Unknown validation ruleset:', config.validation_ruleset);
+			rules = PASS_VALIDITY_RULES.tousAntiCovidDefaultRules;
+		}
+		rules.checkCertificate(cert);
+		let code_digest = cert.fingerprint;
 		const last_validated = validated_passes.get(code_digest);
 		const now = Date.now();
 		if (last_validated && now - last_validated < prevent_revalidation_before_ms) {
@@ -125,19 +131,6 @@
 			}
 		}, reset_after_s * 1000);
 	}
-
-	function showName({ first_name, last_name, date_of_birth }: CommonCertificateInfo): string {
-		return (
-			(first_name[0] || '').toUpperCase() +
-			first_name.slice(1).toLowerCase() +
-			' ' +
-			last_name.toUpperCase() +
-			' né(e) le ' +
-			date_of_birth.toLocaleDateString("fr")
-		);
-	}
-
-	onDestroy(() => clearInterval(pass_history_clean_interval));
 </script>
 
 <svelte:window on:keypress={onKeyPress} on:paste={onPaste} />
@@ -146,6 +139,18 @@
 		<link rel="stylesheet" href="data:text/css,{encodeURIComponent(config.custom_css)}" />
 	{/if}
 </svelte:head>
+
+<Slideshow
+	file_urls={config.background_images}
+	classes="background slideshow"
+	style="
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		z-index: -1;"
+/>
 
 <div
 	class="main container"
@@ -157,51 +162,20 @@
 		{#await codeFoundPromise}
 			Décodage du code...
 		{:then pass}
-			{#if config.sound_valid !== null}
-				<!-- svelte-ignore a11y-media-has-caption -->
-				<audio autoplay src="{assets}/{config.sound_valid || 'valid.mp3'}" />
-			{/if}
-			<div class="validated_pass alert alert-success" role="alert">
-				<div class="row">
-					<div class="col-md-2"><div class="sign shallpass" /></div>
-					<div class="col-md-10">
-						<h3>
-							Bienvenue, {#if !config.anonymize}{showName(pass.cert)}{/if}
-						</h3>
-						<p>Votre passe est validé.</p>
-						<div class="progress">
-							<div
-								class="progress-bar bg-success animate"
-								role="progressbar"
-								style="animation-duration: {reset_after_s}s"
-							/>
-						</div>
-					</div>
-				</div>
-			</div>
+			<ValidationMessage context={pass} valid={true} {config} />
 		{:catch err}
-			{#if config.sound_invalid !== null}
-				<!-- svelte-ignore a11y-media-has-caption -->
-				<audio autoplay src="{assets}/{config.sound_invalid || 'invalid.mp3'}" />
-			{/if}
-			<div class="refused_pass alert alert-danger" role="alert">
-				<div class="row">
-					<div class="col-md-2"><div class="sign shallnotpass" /></div>
-					<div class="col-md-10">
-						<h3>Passe sanitaire invalide</h3>
-						<p class="font-monospace">{err.message}</p>
-						<div class="progress">
-							<div
-								class="progress-bar bg-danger animate"
-								role="progressbar"
-								style="animation-duration: {reset_after_s}s"
-							/>
-						</div>
-					</div>
-				</div>
-			</div>
+			<ValidationMessage context={err} valid={false} {config} />
 		{/await}
 	{:else}
+		{#if config.slideshow_media.length}
+			<section id="top_media">
+				<Slideshow
+					file_urls={config.slideshow_media}
+					style="width:100%"
+					classes="top_media slideshow"
+				/>
+			</section>
+		{/if}
 		<section id="welcome_message">
 			<div class="logos row justify-content-center w-100">
 				{#each config.logo_urls as url}
@@ -209,12 +183,16 @@
 						alt="logo"
 						src={url}
 						class="logo col"
-						style="object-fit: contain; max-height: 10em;"
+						style="object-fit: contain; max-height: 10em"
 					/>
 				{/each}
 			</div>
 			<h1>{config.title}</h1>
-			<p class="description">{config.description}</p>
+			<p class="description">
+				{#each config.description.split('\n') as p}
+					<p>{p}</p>
+				{/each}
+			</p>
 		</section>
 	{/if}
 
@@ -267,90 +245,16 @@
 	{/if}
 
 	<p class="fixed-bottom text-muted fw-lighter fst-italic" style="font-size: .8em">
+		<ConnectionIndicator {config} {last_sync} {last_update} />
 		{config.bottom_infos}
 	</p>
 </div>
 
 {#if config.show_statistics_on_scan}
-	<ScanStatsModal />
+	<ScanStatsModal autoclose={config.autoclose_statistics} />
 {/if}
 
 <style>
-	.progress-bar {
-		width: 100%;
-		transition: 100ms;
-	}
-
-	.progress-bar.animate {
-		animation: reduce_width;
-	}
-
-	@keyframes reduce_width {
-		to {
-			width: 0%;
-		}
-	}
-
-	.sign {
-		border: 0.1em solid white;
-		width: 5em;
-		height: 5em;
-		border-radius: 50%;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.shallnotpass {
-		background-color: var(--bs-danger);
-	}
-	.shallnotpass::after {
-		content: ' ';
-		display: block;
-		background-color: white;
-		animation: shallnotpass 0.5s;
-		height: 0.8em;
-		width: 65%;
-	}
-	@keyframes shallnotpass {
-		from {
-			height: 0;
-			width: 0%;
-		}
-		to {
-			height: 0.8em;
-			width: 65%;
-		}
-	}
-
-	.shallpass {
-		background-color: var(--bs-success);
-		animation: shallpass 0.8s;
-	}
-	.shallpass::before {
-		content: ' ';
-		display: block;
-		background-color: white;
-		height: 1em;
-		width: 0.8em;
-		transform: rotate(-45deg) translate(0.37em, 0.4em);
-	}
-	.shallpass::after {
-		content: ' ';
-		display: block;
-		background-color: white;
-		height: 0.8em;
-		width: 50%;
-		transform: rotate(-45deg);
-	}
-	@keyframes shallpass {
-		from {
-			transform: rotate(360deg);
-		}
-		to {
-			transform: rotate(0);
-		}
-	}
 	.videoinput {
 		max-height: 45vh;
 		display: flex;
@@ -358,5 +262,18 @@
 	}
 	h1 {
 		font-size: 2em;
+	}
+
+	#top_media {
+		aspect-ratio: 16/9;
+		margin-bottom: 1em;
+		border-radius: 10px;
+		overflow: hidden;
+	}
+
+	@media (min-width: 770px) {
+		#top_media {
+			aspect-ratio: 12/5;
+		}
 	}
 </style>

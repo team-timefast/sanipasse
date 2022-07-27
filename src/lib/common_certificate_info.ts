@@ -13,6 +13,7 @@ export interface CommonTestInfo {
 	type: 'test';
 	test_date: Date;
 	is_negative: boolean;
+	test_type: string;
 	/// Set to true if the test did not give a conclusive result.
 	is_inconclusive: boolean;
 }
@@ -22,6 +23,8 @@ export interface AllCommonInfo {
 	last_name: string;
 	date_of_birth: Date;
 	code: string;
+	/** sha256 fingerprint */
+	fingerprint: string;
 	source: { format: 'dgc'; cert: DGC } | { format: '2ddoc'; cert: Certificate2ddoc };
 }
 

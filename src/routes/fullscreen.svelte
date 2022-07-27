@@ -15,12 +15,6 @@
 			? code
 			: 'https://bonjour.tousanticovid.gouv.fr/app/wallet2d#' + encodeURIComponent(code);
 		writer.writeToDom(div, contents, width, height, new Map());
-		// See https://github.com/zxing-js/browser/pull/59
-		const svg = div.querySelector('svg');
-		if (svg) {
-			svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-			svg.style.width = '100%';
-		}
 	}
 	$: if (div) updateCode(div);
 </script>
@@ -35,11 +29,27 @@
 			<pre class="alert alert-danger">Certificat invalide: {e} </pre>
 		{/await}
 		{#if $wallet.includes(code)}
+			{#if $wallet[0] !== code}
+				<button
+					class="btn btn-primary w-100 mt-2"
+					on:click={(_) => {
+						wallet.favorite(code);
+					}}>Marquer comme certificat préféré</button
+				>
+			{/if}
 			<button
-				class="btn btn-danger w-100"
+				class="btn btn-danger w-100 mt-2"
 				on:click={(_) => {
-					wallet.remove(code);
+					if (confirm('Êtes-vous sûr de vouloir supprimer définitivement ce passe ?'))
+						wallet.remove(code);
 				}}>Supprimer de mon carnet</button
+			>
+		{:else}
+			<button
+				class="btn btn-success w-100 mt-2"
+				on:click={(_) => {
+					wallet.add(code);
+				}}>Ajouter à mon carnet</button
 			>
 		{/if}
 	</div>
@@ -51,7 +61,7 @@
 		width: 100%;
 		min-height: 50vh;
 	}
-	div svg {
+	div :global(svg) {
 		width: 100%;
 	}
 </style>

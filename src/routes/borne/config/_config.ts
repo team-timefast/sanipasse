@@ -1,3 +1,5 @@
+import type { ValidityRuleName } from '$lib/detect_certificate';
+
 export interface HTTPRequest {
 	method: string;
 	url: string;
@@ -34,6 +36,18 @@ export interface ConfigProperties {
 	store_statistics?: boolean;
 	// Whether to show the statistics on the scan page
 	show_statistics_on_scan?: boolean;
+	// Whether to close the statistics modal automatically after a few seconds
+	autoclose_statistics?: boolean;
+	// Message displayed when a pass is valid
+	accepted_message?: string;
+	// Message displayed when a pass is invalid
+	refused_message?: string;
+	// URL of background image
+	background_images: string[];
+	// Slideshow above the welcome message
+	slideshow_media: string[];
+	// Name of the set of rules to apply
+	validation_ruleset: ValidityRuleName;
 }
 
 export const DEFAULT_CONFIG: ConfigProperties = {
@@ -50,5 +64,11 @@ export const DEFAULT_CONFIG: ConfigProperties = {
 	anonymize: false,
 	prevent_revalidation_before_minutes: 0,
 	video_scan: true,
-	store_statistics: true
+	store_statistics: true,
+	accepted_message:
+		'Bienvenue, $first_name $last_name\n\nCe passe, appartenant à $first_name $last_name, né(e) le $date_of_birth, est valide.',
+	refused_message: 'Passe sanitaire invalide\n\n$message',
+	background_images: [],
+	slideshow_media: [],
+	validation_ruleset: 'tousAntiCovidDefaultRules'
 };

@@ -5,28 +5,94 @@ import { X509Certificate, PublicKey } from '@peculiar/x509';
 import crypto from 'isomorphic-webcrypto';
 import fs from 'fs';
 
+const OUTFILE = 'src/assets/Digital_Green_Certificate_Signing_Keys.json';
+const ALL_DATA_FILE = '/tmp/tacv_data.json';
+// Concatenated sh256 fingerprints of blacklisted certificates
+const BLACKLIST_FILE = 'src/assets/blacklist_text.json';
+const ENDPOINT = 'https://portail.tacv.myservices-ingroupe.com';
+
 async function main() {
-	const OUTFILE = 'src/assets/Digital_Green_Certificate_Signing_Keys.json';
 	const TOKEN = process.env['TACV_TOKEN'];
 	if (!TOKEN)
 		return console.log(
 			'Missing environment variable TACV_TOKEN. ' +
 				'You can get the value of the token from the TousAntiCovid Verif application.'
 		);
-	const certs = await get_data(TOKEN);
+
+	await Promise.all([handle_blacklist(TOKEN), handle_tacv_data(TOKEN)]);
+}
+
+async function handle_tacv_data(TOKEN) {
+	const tacv_data = await get_data(TOKEN);
+	await Promise.all([
+		save_tacv_data(tacv_data),
+		save_validity_data(tacv_data),
+		save_certs(tacv_data)
+	]);
+}
+
+async function handle_blacklist(TOKEN) {
+	const promises = ['dcc', '2ddoc'].map((t) => get_blacklist(t, TOKEN));
+	const blacklists = await Promise.all(promises);
+	await save_blacklist(blacklists.flat());
+}
+
+async function save_tacv_data(tacv_data) {
+	await fs.promises.writeFile(ALL_DATA_FILE, JSON.stringify(tacv_data));
+	console.log('Saved all data to ' + ALL_DATA_FILE);
+}
+
+async function save_certs(tacv_data) {
+	const certs = await get_certs(tacv_data);
 	const contents = JSON.stringify(certs, null, '\t') + '\n';
 	await fs.promises.writeFile(OUTFILE, contents);
 	console.log(`Wrote ${Object.keys(certs).length} certificates to ${OUTFILE}`);
 }
 
 async function get_data(token) {
-	const ENDPOINT = 'https://portail.tacv.myservices-ingroupe.com';
 	const resp = await fetch(`${ENDPOINT}/api/client/configuration/synchronisation/tacv`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (resp.status !== 200) throw new Error(`API returned error: ${await resp.text()}`);
-	const { certificates2DDoc, certificatesDCC } = await resp.json();
-	const entries = Object.entries(certificatesDCC);
+	console.log('Fetched validity and certificates data');
+	return await resp.json();
+}
+
+async function save_validity_data(tacv_data) {
+	const VALIDITY_DATA_FILE = 'src/assets/validity_data.json';
+	const validity = tacv_data.specificValues.validity;
+	const sorted = Object.fromEntries(Object.entries(validity).sort(([a], [b]) => (a > b ? 1 : -1)));
+	await writeNiceJson(sorted, VALIDITY_DATA_FILE);
+	console.log('Saved validity data to ' + VALIDITY_DATA_FILE);
+}
+
+/**
+ * @param {'dcc'|'2ddoc'} type blacklist type
+ * @param {string} token JWT token
+ * @returns {string[]} hex digest of blacklisted certificates
+ */
+async function get_blacklist(type, token) {
+	const resp = await fetch(`${ENDPOINT}/api/client/configuration/blacklist/tacv/${type}/0`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (resp.status !== 200) throw new Error(`API returned error: ${await resp.text()}`);
+	const { elements, _lastIndexBlacklist } = await resp.json();
+	console.log(`Fetched ${elements.length} blacklisted ${type} certificates`);
+	return elements.flatMap(({ hash, active }) => (active ? [hash] : []));
+}
+
+async function save_blacklist(blacklist) {
+	await writeNiceJson(blacklist.join(' '), BLACKLIST_FILE);
+	console.log(`Saved ${blacklist.length}-item blacklist to ${BLACKLIST_FILE}`);
+}
+
+async function writeNiceJson(data, filename) {
+	const nice = JSON.stringify(data, null, '\t') + '\n';
+	return fs.promises.writeFile(filename, nice);
+}
+
+async function get_certs(tacv_data) {
+	const entries = Object.entries(tacv_data.certificatesDCC);
 	const parsed = await Promise.all(
 		entries.map(async ([kid, cert]) => {
 			return [kid, await parseCert(cert)];
@@ -34,7 +100,7 @@ async function get_data(token) {
 	);
 	const sorted = parsed
 		.filter((cert) => !!cert) // Remove certificates that could not be decoded
-		.sort(([k1, a], [k2, b]) => (a.subject < b.subject ? -1 : 1));
+		.sort(([_k1, a], [_k2, b]) => (a.subject < b.subject ? -1 : 1));
 	return Object.fromEntries(sorted);
 }
 async function parseCert(cert) {

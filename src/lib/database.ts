@@ -2,9 +2,8 @@ import SequelizePKG from 'sequelize';
 const { Sequelize, STRING, DATE, BOOLEAN, Model } = SequelizePKG;
 import { generateKey } from '$lib/random_key';
 import type { DBEvent, DBPerson } from '$lib/event';
+import { DATABASE_CONNECTION_STRING } from './global_config';
 
-const DATABASE_CONNECTION_STRING =
-	process.env['DATABASE_CONNECTION_STRING'] || 'sqlite:sanipasse.db';
 const sequelize = new Sequelize(DATABASE_CONNECTION_STRING);
 
 class Event extends Model<DBEvent> {}
@@ -82,6 +81,8 @@ const SyncedEvent = sync.then(() => Event);
 const SyncedPerson = sync.then(() => Person);
 const SyncedBorneConfig = sync.then(() => BorneConfig);
 const SyncedApiKeys = sync.then(() => ApiKeys);
+
+export type AsJson<T> = T extends Date ? Date : { [K in keyof T]: AsJson<T[K]> };
 
 export {
 	SyncedEvent as Event,

@@ -1,5 +1,5 @@
 import type { CommonCertificateInfo } from './common_certificate_info';
-import type { DBEvent } from './event';
+import { findCertificateError, validityInterval } from './tac_verif_rules';
 
 export const DGC_PREFIX = 'HC1:';
 
@@ -34,47 +34,30 @@ export async function parse_any(doc_or_link: string): Promise<CommonCertificateI
 	return await parse(doc);
 }
 
-export function findCertificateError(
-	c: CommonCertificateInfo,
-	event?: DBEvent
-): string | undefined {
-	const MAX_NEGATIVE_TEST_AGE_HOURS = 24;
-	const MIN_POSITIVE_TEST_AGE_DAYS = 15;
-	const MAX_POSITIVE_TEST_AGE_DAYS = 6 * 30;
-	const MIN_VACCINATION_AGE_DAYS = 7;
-
-	const target_date = event?.date || new Date();
-	const event_date = c.type === 'vaccination' ? c.vaccination_date : c.test_date;
-	const age_hours = (+target_date - +event_date) / (3600 * 1000);
-	const age_days = age_hours / 24;
-
-	if (c.type === 'vaccination') {
-		if (c.doses_received < c.doses_expected)
-			return `Vous n'avez reçu que ${c.doses_received} dose sur les ${c.doses_expected} que ce vaccin demande.`;
-		if (age_days < MIN_VACCINATION_AGE_DAYS)
-			return (
-				`La vaccination est totalement efficace après au moins ${MIN_VACCINATION_AGE_DAYS} jours. ` +
-				`Ce certificat n'a que ${age_days | 0} jours.`
-			);
-	} else {
-		// test
-		if (c.is_inconclusive) {
-			return `Ce test n'a pas permis de déterminer de manière certaine la présence ou l'absence de la substance recherchée.`;
-		} else if (c.is_negative) {
-			if (age_hours > MAX_NEGATIVE_TEST_AGE_HOURS)
-				return (
-					`Ce test a ${age_hours.toLocaleString('fr', { maximumFractionDigits: 0 })} heures.` +
-					` Un test de moins de ${MAX_NEGATIVE_TEST_AGE_HOURS} heures est demandé.`
-				);
-		} else {
-			//positive test
-			if (age_days < MIN_POSITIVE_TEST_AGE_DAYS || age_days > MAX_POSITIVE_TEST_AGE_DAYS)
-				return (
-					`Ce test a ${age_days.toLocaleString('fr', { maximumFractionDigits: 0 })} jours.` +
-					` Un test de plus de ${MIN_POSITIVE_TEST_AGE_DAYS} jours et de moins de ${
-						MAX_POSITIVE_TEST_AGE_DAYS / 30
-					} mois est demandé.`
-				);
-		}
+export abstract class RuleSet {
+	public abstract findCertificateError(c: CommonCertificateInfo, date: Date): string | undefined;
+	public findCertificateErrorNow(c: CommonCertificateInfo): string | undefined {
+		return this.findCertificateError(c, new Date());
+	}
+	public checkCertificate(c: CommonCertificateInfo) {
+		const date = new Date();
+		const error = this.findCertificateError(c, date);
+		if (error != null) throw new Error(error);
 	}
 }
+class TousAntiCovidRules extends RuleSet {
+	constructor(public vaccinePass?: boolean) {
+		super();
+	}
+	findCertificateError(c: CommonCertificateInfo, date: Date): string | undefined {
+		return findCertificateError(c, date, this.vaccinePass);
+	}
+}
+
+export const PASS_VALIDITY_RULES = {
+	tousAntiCovidDefaultRules: new TousAntiCovidRules(),
+	tousAntiCovidVaccineRules: new TousAntiCovidRules(true),
+	tousAntiCovidHealthRules: new TousAntiCovidRules(false)
+} as const;
+
+export type ValidityRuleName = keyof typeof PASS_VALIDITY_RULES;

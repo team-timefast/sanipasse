@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { BarcodeFormat, DecodeHintType, NotFoundException } from '@zxing/library';
 	import type { Result } from '@zxing/library';
-	import { BrowserMultiFormatReader } from '@zxing/browser';
-	import { onMount } from 'svelte';
+	import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
+	import { onDestroy, onMount } from 'svelte';
 	import { createEventDispatcher } from 'svelte';
 
 	const dispatch = createEventDispatcher<{ qrcode: string }>();
@@ -13,7 +13,6 @@
 	export let videoError: Error | null = null;
 
 	let videoElement: HTMLVideoElement | undefined = undefined;
-	let stop = () => {};
 
 	const codeReader = new BrowserMultiFormatReader(
 		new Map([
@@ -22,33 +21,34 @@
 		])
 	);
 
-	let decodePromise: Promise<void> = Promise.resolve();
+	let controls: IScannerControls | undefined = undefined;
+	let mediaStreamPromise: Promise<MediaStream> | undefined = undefined;
+	$: decodePromise = mediaStreamPromise ? mediaStreamPromise.then(start) : Promise.resolve();
+	$: if (mediaStreamPromise) mediaStreamPromise.catch((e) => (videoError = e));
 
-	function error(e: any) {
-		decodePromise = Promise.reject(e);
+	function loadCamera() {
+		stop();
+		mediaStreamPromise = navigator.mediaDevices.getUserMedia({
+			audio: false,
+			video: facingMode ? { facingMode } : true
+		});
 	}
 
+	onMount(loadCamera);
+
 	async function start(mediaStream: MediaStream) {
+		started = true;
 		try {
 			console.log(`Started decode from camera with id ${mediaStream.id}`);
 			// you can use the controls to stop() the scan or switchTorch() if available
-			const controls = await codeReader.decodeFromStream(
-				mediaStream,
-				videoElement,
-				(result, err) => {
-					console.log(`zxing callback called, result: ${result}, err: ${err}`);
-					if (!started) return;
-					if (err || !result) {
-						if (!(err instanceof NotFoundException)) error(err);
-						return;
-					} else onResult(result);
-				}
-			);
-			stop = () => {
-				controls.stop();
-				mediaStream.getTracks().forEach((track) => track.stop());
-			};
-			started = true;
+			controls = await codeReader.decodeFromStream(mediaStream, videoElement, (result, err) => {
+				console.log(`zxing callback called, result: ${result}, err: ${err}`);
+				if (!started) return;
+				if (err || !result) {
+					if (!(err instanceof NotFoundException)) error(err);
+					return;
+				} else onResult(result);
+			});
 		} catch (e) {
 			error(e);
 		}
@@ -59,24 +59,20 @@
 		dispatch('qrcode', data);
 	}
 
-	function onUnMount() {
+	function error(e: any) {
 		stop();
-		started = false;
+		decodePromise = Promise.reject(e);
 	}
 
-	function loadCamera() {
+	async function stop() {
+		if (controls) controls.stop();
+		if (mediaStreamPromise) {
+			const mediaStream = await mediaStreamPromise;
+			mediaStream.getTracks().forEach((track) => track.stop());
+		}
 		started = false;
-		stop();
-		const videoPromise = navigator.mediaDevices.getUserMedia({
-			audio: false,
-			video: facingMode ? { facingMode } : true
-		});
-		decodePromise = videoPromise.then(start);
-		videoPromise.catch((e) => (videoError = e));
-		return onUnMount;
 	}
-
-	onMount(loadCamera);
+	onDestroy(stop);
 </script>
 
 <div class="video-container" class:started>

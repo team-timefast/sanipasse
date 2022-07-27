@@ -1,12 +1,14 @@
 <script type="ts">
 	import { Alert, Icon, Row, Col } from 'sveltestrap';
-	import { findCertificateError } from '$lib/detect_certificate';
+	import { PASS_VALIDITY_RULES } from '$lib/detect_certificate';
 	import type { CommonCertificateInfo } from '$lib/common_certificate_info';
 	import Certificate2ddocDetails from './_Certificate2ddocDetails.svelte';
 	import CertificateDgcDetails from './_CertificateDGCDetails.svelte';
+	import { validityInterval } from '$lib/tac_verif_rules';
 	export let info: CommonCertificateInfo;
 	export let with_fullscreen = false;
-	$: error = findCertificateError(info);
+	const validity = validityInterval(info);
+	$: error = PASS_VALIDITY_RULES.tousAntiCovidDefaultRules.findCertificateErrorNow(info);
 	$: source = info.source;
 </script>
 
@@ -34,6 +36,10 @@
 				<span class="last_name">{info.last_name}</span>
 			</p>
 			<p>🎂 Né(e) le {info.date_of_birth.toLocaleDateString('fr')}</p>
+			{#if !error && 'end' in validity && Date.now() + 1000 * 3600 * 24 * 365 > validity.end.getTime()}
+				<!-- Avertissement à propos des certificats qui vont expirer -->
+				<p class="error">📅 Certificat valide jusqu'au {validity.end.toLocaleDateString('fr')}</p>
+			{/if}
 		</Col>
 	</Row>
 	<Row>
